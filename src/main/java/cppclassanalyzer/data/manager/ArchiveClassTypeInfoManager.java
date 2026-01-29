@@ -40,7 +40,7 @@ import cppclassanalyzer.database.tables.ArchivedClassTypeInfoDatabaseTable;
 import cppclassanalyzer.database.tables.ArchivedGnuVtableDatabaseTable;
 import cppclassanalyzer.database.utils.TransactionHandler;
 import cppclassanalyzer.plugin.ClassTypeInfoManagerPlugin;
-import db.DBConstants;
+import ghidra.framework.data.OpenMode;
 import db.DBHandle;
 import db.Table;
 import generic.jar.ResourceFile;
@@ -134,7 +134,7 @@ public final class ArchiveClassTypeInfoManager extends StandAloneDataTypeManager
 
 	public static ArchiveClassTypeInfoManager createManager(ClassTypeInfoManagerService plugin,
 			File file) throws IOException {
-		return new ArchiveClassTypeInfoManager(plugin, file, DBConstants.CREATE);
+		return new ArchiveClassTypeInfoManager(plugin, file, OpenMode.CREATE);
 	}
 
 	@Override
@@ -149,7 +149,7 @@ public final class ArchiveClassTypeInfoManager extends StandAloneDataTypeManager
 
 	public static ArchiveClassTypeInfoManager open(ClassTypeInfoManagerService plugin, File file,
 			boolean openForUpdate) throws IOException {
-		int mode = openForUpdate ? DBConstants.UPDATE : DBConstants.READ_ONLY;
+		int mode = openForUpdate ? OpenMode.UPDATE : OpenMode.IMMUTABLE;
 		return new ArchiveClassTypeInfoManager(plugin, file, mode);
 	}
 

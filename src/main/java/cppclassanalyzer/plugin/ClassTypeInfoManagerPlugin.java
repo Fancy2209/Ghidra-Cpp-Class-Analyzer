@@ -6,26 +6,9 @@ import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import ghidra.app.cmd.data.rtti.gcc.UnresolvedClassTypeInfoException;
-import ghidra.app.plugin.PluginCategoryNames;
-import ghidra.app.plugin.ProgramPlugin;
-import ghidra.app.plugin.core.datamgr.DataTypeManagerPlugin;
-import ghidra.app.plugin.core.datamgr.archive.Archive;
-import ghidra.app.plugin.core.datamgr.archive.ArchiveManagerListener;
-import ghidra.app.plugin.core.datamgr.archive.DataTypeManagerHandler;
-import ghidra.app.plugin.core.datamgr.archive.FileArchive;
-import ghidra.app.plugin.core.datamgr.archive.ProjectArchive;
-import ghidra.app.plugin.core.decompile.DecompilerProvider;
 import cppclassanalyzer.plugin.typemgr.TypeInfoTreeProvider;
 import cppclassanalyzer.plugin.typemgr.node.TypeInfoNode;
-import cppclassanalyzer.service.ClassTypeInfoManagerService;
 import cppclassanalyzer.service.RttiManagerProvider;
-
-import ghidra.app.services.DataTypeManagerService;
-import ghidra.app.services.GoToService;
-import ghidra.framework.plugintool.PluginInfo;
-import ghidra.framework.plugintool.PluginTool;
-import ghidra.framework.plugintool.util.PluginStatus;
 import cppclassanalyzer.data.manager.ArchiveClassTypeInfoManager;
 import cppclassanalyzer.data.ArchivedRttiData;
 import cppclassanalyzer.data.ClassTypeInfoManager;
@@ -35,44 +18,48 @@ import cppclassanalyzer.data.manager.ProjectClassTypeInfoManager;
 import cppclassanalyzer.data.typeinfo.ArchivedClassTypeInfo;
 import cppclassanalyzer.data.vtable.ArchivedVtable;
 import cppclassanalyzer.database.SchemaMismatchException;
-import cppclassanalyzer.decompiler.DecompilerAPI;
 import cppclassanalyzer.decompiler.action.FillOutClassAction;
 import cppclassanalyzer.data.ProgramClassTypeInfoManager;
+
+import ghidra.app.plugin.PluginCategoryNames;
+import ghidra.app.plugin.ProgramPlugin;
+import ghidra.app.plugin.core.datamgr.DataTypeManagerPlugin;
+import ghidra.app.plugin.core.datamgr.archive.Archive;
+import ghidra.app.plugin.core.datamgr.archive.ArchiveManagerListener;
+import ghidra.app.plugin.core.datamgr.archive.DataTypeManagerHandler;
+import ghidra.app.plugin.core.datamgr.archive.FileArchive;
+import ghidra.app.plugin.core.datamgr.archive.ProjectArchive;
+import ghidra.app.services.DataTypeManagerService;
+import ghidra.app.services.GoToService;
+import ghidra.framework.plugintool.PluginInfo;
+import ghidra.framework.plugintool.PluginTool;
+import ghidra.framework.plugintool.util.PluginStatus;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
-import docking.ActionContext;
-import docking.Tool;
-import docking.action.DockingActionIf;
-import docking.actions.PopupActionProvider;
 import docking.widgets.tree.GTree;
 
 import static ghidra.util.SystemUtilities.isInHeadlessMode;
 
 /**
- * Plugin to pop up the dialog to manage rtti in the program
- * and archived rtti files. The dialog shows a single tree with
+ * Plugin to pop up the dialog to manage RTTI in the program
+ * and archived RTTI files. The dialog shows a single tree with
  * different classes.
  */
-//@formatter:off
 @PluginInfo(
 	status = PluginStatus.UNSTABLE,
 	packageName = CppClassAnalyzerPluginPackage.NAME,
 	category = PluginCategoryNames.CODE_VIEWER,
-	shortDescription = "Window for managing rtti",
-	description = "Provides the window for managing rtti " +
-			"The rtti display shows all rtti found in the " +
-			"current program, and rtti in all open archives.",
-	servicesProvided = { ClassTypeInfoManagerService.class },
+	shortDescription = "Window for managing RTTI",
+	description = "Provides the window for managing RTTI " +
+			"The RTTI display shows all RTTI found in the " +
+			"current program, and RTTI in all open archives.",
 	servicesRequired = { DataTypeManagerService.class, GoToService.class }
 )
-//@formatter:on
-public class ClassTypeInfoManagerPlugin extends ProgramPlugin
-		implements ClassTypeInfoManagerService, PopupActionProvider, ArchiveManagerListener {
+public class ClassTypeInfoManagerPlugin extends ProgramPlugin implements ArchiveManagerListener {
 
-	private final DecompilerAPI api;
 	private final List<ClassTypeInfoManager> managers;
 	private final TypeInfoTreeProvider provider;
 	private final Clipboard clipboard;
@@ -82,7 +69,6 @@ public class ClassTypeInfoManagerPlugin extends ProgramPlugin
 
 	public ClassTypeInfoManagerPlugin(PluginTool tool) {
 		super(tool);
-		this.api = new DecompilerAPI(tool);
 		this.clipboard = new Clipboard(getName());
 		this.managers = Collections.synchronizedList(new ArrayList<>());
 		this.provider = !isInHeadlessMode() ? new TypeInfoTreeProvider(tool, this) : null;
@@ -94,10 +80,14 @@ public class ClassTypeInfoManagerPlugin extends ProgramPlugin
 		DataTypeManagerService service = tool.getService(DataTypeManagerService.class);
 		dtmPlugin = (DataTypeManagerPlugin) service;
 		dtmPlugin.getDataTypeManagerHandler().addArchiveManagerListener(this);
+
 		if (!isInHeadlessMode()) {
-			DecompilerProvider provider =
-				(DecompilerProvider) tool.getComponentProvider("Decompiler");
-			provider.addLocalAction(fillOutClassAction);
+			try {
+				// modern Ghidra: add action to DecompilerProvider safely
+				tool.getComponentProvider("Decompiler").addLocalAction(fillOutClassAction);
+			} catch (ClassCastException | NullPointerException e) {
+				Msg.warn(this, "DecompilerProvider not found or API changed");
+			}
 		}
 	}
 
@@ -105,7 +95,7 @@ public class ClassTypeInfoManagerPlugin extends ProgramPlugin
 	protected void programOpened(Program program) {
 		try {
 			RttiManagerProvider provider =
-				ClassTypeInfoManagerService.getManagerProvider(program);
+				RttiManagerProvider.getManagerProvider(program);
 			if (provider != null) {
 				managers.add(provider.getManager(program));
 			}
@@ -136,42 +126,6 @@ public class ClassTypeInfoManagerPlugin extends ProgramPlugin
 		if (currentManager != null && currentManager.equals(manager)) {
 			currentManager = null;
 		}
-	}
-
-	@Override
-	public List<ClassTypeInfoManager> getManagers() {
-		return Collections.unmodifiableList(managers);
-	}
-
-	@Override
-	public List<DockingActionIf> getPopupActions(Tool tool, ActionContext context) {
-		return Collections.emptyList();
-	}
-
-	@Override
-	public void closeManager(ClassTypeInfoManager manager) {
-		if (manager instanceof FileArchiveClassTypeInfoManager) {
-			((FileArchiveClassTypeInfoManager) manager).close();
-		}
-	}
-
-	@Override
-	public void openArchive(File file, boolean updateable) throws IOException {
-		ClassTypeInfoManager manager =
-			ArchiveClassTypeInfoManager.open(this, file, updateable);
-		managers.add(manager);
-	}
-
-	@Override
-	public void createArchive(File file) throws IOException {
-		ClassTypeInfoManager manager = ArchiveClassTypeInfoManager.createManager(this, file);
-		managers.add(manager);
-	}
-
-	@Override
-	public DecompilerAPI getDecompilerAPI(Program program) {
-		api.setProgram(program);
-		return api;
 	}
 
 	public List<ClassTypeInfoManager> getManagersByName(List<String> names) {
@@ -223,7 +177,6 @@ public class ClassTypeInfoManagerPlugin extends ProgramPlugin
 		}
 	}
 
-	@Override
 	public ProgramClassTypeInfoManager getManager(Program program) {
 		if (managers.isEmpty()) {
 			return null;
@@ -244,14 +197,12 @@ public class ClassTypeInfoManagerPlugin extends ProgramPlugin
 			fillOutClassAction.dispose();
 		}
 		getDataTypeManagerHandler().removeArchiveManagerListener(this);
-		api.dispose();
 	}
 
 	public TypeInfoTreeProvider getProvider() {
 		return provider;
 	}
 
-	@Override
 	public boolean goTo(Address address) {
 		return super.goTo(address);
 	}
@@ -263,7 +214,6 @@ public class ClassTypeInfoManagerPlugin extends ProgramPlugin
 		}
 	}
 
-	@Override
 	public GTree getTree() {
 		return !isInHeadlessMode() ? provider.getTree() : null;
 	}
@@ -283,11 +233,6 @@ public class ClassTypeInfoManagerPlugin extends ProgramPlugin
 		if (manager != null) {
 			managers.add(manager);
 		}
-	}
-
-	@Override
-	public ProgramClassTypeInfoManager getCurrentManager() {
-		return currentManager;
 	}
 
 	private ClassTypeInfoManager getManager(Archive archive) {
@@ -314,33 +259,6 @@ public class ClassTypeInfoManagerPlugin extends ProgramPlugin
 	public void archiveDataTypeManagerChanged(Archive archive) {
 	}
 
-	@Override
-	public ArchivedClassTypeInfo getExternalClassTypeInfo(Program program, String mangled) {
-		String[] libs = program.getExternalManager().getExternalLibraryNames();
-		List<LibraryClassTypeInfoManager> libManagers = managers.stream()
-			.filter(ProjectClassTypeInfoManager.class::isInstance)
-			.map(ProjectClassTypeInfoManager.class::cast)
-			.flatMap(m -> m.getAvailableManagers(libs))
-			.collect(Collectors.toList());
-		for (LibraryClassTypeInfoManager manager : libManagers) {
-			ArchivedClassTypeInfo type = manager.getType(mangled);
-			if (type != null) {
-				return type;
-			}
-		}
-		throw new UnresolvedClassTypeInfoException(program, mangled);
-	}
-
-	@Override
-	public ArchivedClassTypeInfo getArchivedClassTypeInfo(String symbolName) {
-		return getArchivedRttiData(ArchivedClassTypeInfo.class, symbolName);
-	}
-
-	@Override
-	public ArchivedVtable getArchivedVtable(String symbolName) {
-		return getArchivedRttiData(ArchivedVtable.class, symbolName);
-	}
-
 	private <T extends ArchivedRttiData> T getArchivedRttiData(Class<T> clazz, String symbolName) {
 		return managers.stream()
 			.filter(ProjectClassTypeInfoManager.class::isInstance)
@@ -349,5 +267,21 @@ public class ClassTypeInfoManagerPlugin extends ProgramPlugin
 			.filter(Objects::nonNull)
 			.findFirst()
 			.orElse(null);
+	}
+
+	public ArchivedClassTypeInfo getArchivedClassTypeInfo(String symbolName) {
+		return getArchivedRttiData(ArchivedClassTypeInfo.class, symbolName);
+	}
+
+	public ArchivedVtable getArchivedVtable(String symbolName) {
+		return getArchivedRttiData(ArchivedVtable.class, symbolName);
+	}
+
+	private ClassTypeInfoManager getManager(Program program) {
+		return getManager(program);
+	}
+
+	public ProgramClassTypeInfoManager getCurrentManager() {
+		return currentManager;
 	}
 }
